@@ -55,7 +55,7 @@ textarea{resize:none;display:block}
 #toast.on{opacity:1;transform:translate(-50%,0)}
 .big{font-size:84px;font-weight:700;letter-spacing:-.03em;margin-top:40px;color:var(--ac)}
 /* results */
-.stats{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
 .stat{background:var(--card);border-radius:12px;padding:10px 4px;text-align:center}
 .stat b{display:block;font-size:18px}.stat span{font-size:11px;color:var(--mu)}
 .acc{display:flex;align-items:center;gap:10px;padding:10px 16px;font-size:14px}.acc .bar2{flex:1}.acc b{width:40px;text-align:right}
@@ -63,10 +63,28 @@ summary{display:flex;justify-content:space-between;padding:14px 16px;cursor:poin
 summary::-webkit-details-marker{display:none}
 .warn{color:var(--bad);font-style:normal}
 .ans{padding:8px 16px;border-top:1px solid var(--ln);font-size:15px}.ans p{margin:2px 0}.g{color:var(--ok)}.r{color:var(--bad)}
+
+#al{position:fixed;top:calc(env(safe-area-inset-top) + 8px);left:12px;right:12px;background:var(--bad);color:#fff;padding:13px 16px;border-radius:14px;z-index:70;font-weight:600;transform:translateY(-160%);transition:transform .3s;box-shadow:0 6px 24px rgba(0,0,0,.3)}
+#al.on{transform:none}
+.live{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--ok);margin-right:6px}.live.off{background:var(--mu)}
+.tbl{overflow-x:auto;background:var(--card);border-radius:14px;margin:8px 0}
+table{width:100%;border-collapse:collapse;font-size:15px}
+th{font-size:12px;color:var(--mu);text-align:left;padding:10px 12px;font-weight:600;white-space:nowrap}
+td{padding:12px;border-top:1px solid var(--ln);white-space:nowrap;vertical-align:top}
+td.wr{white-space:normal;min-width:130px}
+tr.rw{cursor:pointer}tr.rw:active{background:var(--fill)}
+tr.det>td{white-space:normal;background:var(--bg);padding:8px;border-top:0}
+.pill{display:inline-block;padding:2px 9px;border-radius:10px;font-size:12px;font-weight:600;background:var(--fill);color:var(--mu)}
+.pill.ok{background:color-mix(in srgb,var(--ok) 22%,var(--card));color:var(--ok)}
+.pill.bad{background:color-mix(in srgb,var(--bad) 22%,var(--card));color:var(--bad)}
+.gb{border:0;border-radius:8px;padding:7px 11px;font:inherit;font-size:14px;background:var(--fill);color:var(--tx);cursor:pointer}
+.gb.on.y{background:var(--ok);color:#fff}.gb.on.n{background:var(--bad);color:#fff}
+.ala{padding:9px 16px;font-size:14px;border-top:1px solid var(--ln)}.ala:first-child{border-top:0}.ala span{color:var(--mu);margin-right:8px}.ala.r{color:var(--bad);font-weight:600}
+.chk{padding:12px 16px;gap:10px}.chk input{width:22px;height:22px;padding:0;accent-color:var(--ac)}
 </style>
 </head>
 <body>
-<div id="app"></div><div id="ov"></div><div id="toast"></div>
+<div id="al"></div><div id="app"></div><div id="ov"></div><div id="toast"></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script>
 const SB_URL="https://qaktgfvorhjdnopufaig.supabase.co",SB_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFha3RnZnZvcmhqZG5vcHVmYWlnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTUzMjgwOTAsImV4cCI6MjExMDkwNDA5MH0.i_IsoJ2Y84RWguN9FteW0YE24FPjOsxvL99HQlSgR_g";
@@ -78,6 +96,12 @@ const toast=m=>{const t=$("#toast");t.textContent=m;t.className="on";setTimeout(
 const ok=(q,a)=>q.type!="essay"&&String(a??"").trim().toLowerCase()===String(q.answer).trim().toLowerCase();
 const show=(q,a)=>a==null||a===""?"No answer":q.type=="mc"?(q.options[a]??a):a;
 
+let CH=null,AC=null,LIVE=false,alT;
+const unlock=()=>{try{AC=AC||new(window.AudioContext||window.webkitAudioContext)();AC.resume&&AC.resume()}catch(e){}};
+const beep=()=>{try{unlock();const o=AC.createOscillator(),g=AC.createGain();o.frequency.value=880;g.gain.value=.3;o.connect(g);g.connect(AC.destination);o.start();o.stop(AC.currentTime+.3)}catch(e){}if(navigator.vibrate)navigator.vibrate(250)};
+const kp=(fn,b)=>fetch(SB_URL+"/rest/v1/rpc/"+fn,{method:"POST",keepalive:true,headers:{apikey:SB_KEY,Authorization:"Bearer "+SB_KEY,"Content-Type":"application/json"},body:JSON.stringify(b)}).catch(()=>{});
+const isManual=q=>q.type=="essay"||q.manual===true;
+
 /* ---------- STUDENT ---------- */
 function home(){
   const c=new URLSearchParams(location.search).get("c")||"";
@@ -88,9 +112,10 @@ function home(){
   $("#go").onclick=async()=>{
     const n=$("#nm").value.trim(),c=$("#cd").value.trim().toUpperCase();
     if(!n||!c)return $("#er").textContent="Enter your name and the exam code.";
-    document.documentElement.requestFullscreen?.().catch(()=>{});
+    unlock();
+    document.documentElement.requestFullscreen&&document.documentElement.requestFullscreen().catch(()=>{});
     const{data,error}=await sb.rpc("start_exam",{p_code:c,p_name:n});
-    if(error){document.fullscreenElement&&document.exitFullscreen();return $("#er").textContent=error.message.includes("submitted")?"You already submitted this exam.":"Exam code not found. Check it and try again."}
+    if(error){if(document.fullscreenElement)document.exitFullscreen();return $("#er").textContent=error.message.includes("submitted")?"You already submitted this exam.":"Exam code not found. Check it and try again."}
     run(data);
   };
   $("#tl").onclick=e=>{e.preventDefault();teacher()};
@@ -98,22 +123,34 @@ function home(){
 
 function run(d){
   const Q=d.exam.questions,A=d.answers||{},end=Date.parse(d.started_at)+d.exam.minutes*6e4;
-  let i=0,v=d.violations||0,done=false,left=false,sv,tm;
+  let i=0,v=d.violations||0,done=false,left=false,forced=false,beeped=false,busy=false,sv,tm;
   const ac=new AbortController(),on=(t,f,x=document)=>x.addEventListener(t,f,{signal:ac.signal});
-  const fs=()=>document.documentElement.requestFullscreen?.().catch(()=>{});
+  const fs=()=>{document.documentElement.requestFullscreen&&document.documentElement.requestFullscreen().catch(()=>{})};
   const save=()=>{const s=$("#ss");if(s)s.textContent="Saving...";clearTimeout(sv);
     sv=setTimeout(async()=>{const{error}=await sb.rpc("save_answers",{p_sub:d.sub,p_answers:A,p_viol:v});
       const s=$("#ss");if(s)s.textContent=error?"Offline, retrying":"Saved";if(error)setTimeout(save,3000)},500)};
-  const warn=()=>{if(done)return;v++;save();if(v>=MAX)return finish();
-    $("#ov").innerHTML=`<div class="box"><h2>Warning ${v} of ${MAX}</h2><p>You left the exam screen. This was recorded for your teacher. At ${MAX} warnings your exam is submitted automatically.</p><button class="btn" id="rt">Return to exam</button></div>`;
-    $("#ov").className="on";$("#rt").onclick=()=>{$("#ov").className="";fs()}};
-  const out=()=>{left=true},back=()=>{if(left&&!done){left=false;warn()}};
+
+  /* The moment the student leaves, the teacher is told (sent right away, even while the page is hidden). */
+  const out=()=>{
+    if(left||done||busy)return;
+    left=true;v++;beeped=false;
+    if(document.visibilityState=="visible"){beep();beeped=true}
+    if(v>=MAX){forced=true;kp("submit_exam",{p_sub:d.sub,p_answers:A,p_viol:v})}
+    else kp("save_answers",{p_sub:d.sub,p_answers:A,p_viol:v});
+  };
+  const back=()=>{
+    if(!left||done)return;
+    left=false;if(!beeped)beep();
+    if(forced)return finish();
+    $("#ov").innerHTML=`<div class="box"><h2>Warning ${v} of ${MAX}</h2><p>You left the exam screen. Your teacher was notified. At ${MAX} warnings your exam is submitted automatically.</p><button class="btn" id="rt">Return to exam</button></div>`;
+    $("#ov").className="on";$("#rt").onclick=()=>{$("#ov").className="";fs()};
+  };
   on("visibilitychange",()=>document.hidden?out():back());
   on("blur",out,window);on("focus",back,window);
   on("fullscreenchange",()=>{if(!document.fullscreenElement&&!done){out();back()}});
   for(const t of["contextmenu","copy","cut","paste","dragstart"])on(t,e=>e.preventDefault());
   on("beforeunload",e=>{if(!done){e.preventDefault();e.returnValue=""}},window);
-  navigator.wakeLock?.request("screen").catch(()=>{});
+  if(navigator.wakeLock)navigator.wakeLock.request("screen").catch(()=>{});
 
   const tick=()=>{const r=Math.max(0,Math.round((end-Date.now())/1000)),t=$("#tm");
     if(t)t.textContent=Math.floor(r/60)+":"+String(r%60).padStart(2,"0");if(!r)finish()};
@@ -122,8 +159,9 @@ function run(d){
     if(document.fullscreenElement)document.exitFullscreen();$("#ov").className="";
     const{data,error}=await sb.rpc("submit_exam",{p_sub:d.sub,p_answers:A,p_viol:v});
     if(error){done=false;view(`<div class="wrap c"><h1>Connection problem</h1><p class="mu">Your answers are safe. Check your internet and retry.</p><button class="btn" id="rt">Retry</button></div>`);$("#rt").onclick=finish;return}
+    const m=data.manual||0;
     view(`<div class="wrap c"><div class="big">${data.total?data.score+"/"+data.total:"Done"}</div><h1>Exam submitted</h1>
-    <p class="mu">${data.total?Math.round(data.score/data.total*100)+"% on auto-graded items. ":""}Essay answers are checked by your teacher.</p><button class="btn s" id="hm">Close</button></div>`);
+    <p class="mu">${data.total?"Auto-graded score. ":""}${m?m+" answer"+(m>1?"s":"")+" will be checked by your teacher.":""}</p><button class="btn s" id="hm">Close</button></div>`);
     $("#hm").onclick=home;
   }
   const draw=()=>{
@@ -142,7 +180,7 @@ function run(d){
     app.querySelectorAll("[data-g]").forEach(e=>e.onclick=()=>{i=+e.dataset.g;draw()});
     if($("#pv"))$("#pv").onclick=()=>{i--;draw()};
     if($("#nx"))$("#nx").onclick=()=>{i++;draw()};
-    if($("#sb"))$("#sb").onclick=()=>{const m=Q.filter((_,k)=>!A[k]).length;if(confirm(m?m+" unanswered. Submit anyway?":"Submit your exam?"))finish()};
+    if($("#sb"))$("#sb").onclick=()=>{const m=Q.filter((_,k)=>!A[k]).length;busy=true;const y=confirm(m?m+" unanswered. Submit anyway?":"Submit your exam?");setTimeout(()=>{busy=false},800);if(y)finish()};
     tick();
   };
   fs();draw();tm=setInterval(tick,1000);
@@ -163,6 +201,7 @@ function login(){
 }
 
 async function dash(){
+  if(CH){sb.removeChannel(CH);CH=null}
   const{data:ex}=await sb.from("exams").select("id,title,code,minutes,questions").order("created_at",{ascending:false});
   view(`<div class="wrap"><div class="row"><h1>My exams</h1><a href="#" id="so">Sign out</a></div><button class="btn" id="nw">New exam</button>
   ${(ex||[]).map(e=>`<div class="card item"><b>${esc(e.title)}</b><span class="mu">Code <b class="code" style="display:inline">${e.code}</b>, ${e.questions.length} questions, ${e.minutes} min</span>
@@ -170,14 +209,14 @@ async function dash(){
   $("#nw").onclick=build;
   $("#so").onclick=async e=>{e.preventDefault();await sb.auth.signOut();home()};
   app.querySelectorAll("[data-r]").forEach(b=>b.onclick=()=>results(b.dataset.r));
-  app.querySelectorAll("[data-l]").forEach(b=>b.onclick=()=>{navigator.clipboard?.writeText(location.origin+location.pathname+"?c="+b.dataset.l);toast("Link copied")});
+  app.querySelectorAll("[data-l]").forEach(b=>b.onclick=()=>{if(navigator.clipboard)navigator.clipboard.writeText(location.origin+location.pathname+"?c="+b.dataset.l);toast("Link copied")});
   app.querySelectorAll("[data-x]").forEach(b=>b.onclick=async()=>{if(confirm("Delete this exam and all its results?")){await sb.from("exams").delete().eq("id",b.dataset.x);dash()}});
 }
 
 function build(){
   const E={title:"",minutes:30,questions:[]};
   const names={mc:"Multiple choice",tf:"True or false",short:"Short answer",essay:"Essay"};
-  const add=t=>{E.questions.push({type:t,text:"",answer:t=="tf"?"True":"",...(t=="mc"?{options:["","","",""]}:{})});draw()};
+  const add=t=>{E.questions.push({type:t,text:"",answer:t=="tf"?"True":"",...(t=="mc"?{options:["","","",""]}:{}),...(t=="short"?{manual:false}:{})});draw()};
   const draw=()=>{
     view(`<div class="wrap"><div class="row"><h1>New exam</h1><a href="#" id="cx">Cancel</a></div>
     <div class="card"><input id="ti" placeholder="Exam title" value="${esc(E.title)}"><input id="mn" type="number" min="1" placeholder="Minutes" value="${E.minutes}" style="border:0"></div>
@@ -185,18 +224,19 @@ function build(){
     <textarea data-f="t" rows="2" placeholder="Question">${esc(q.text)}</textarea>
     ${q.type=="mc"?q.options.map((o,k)=>`<label class="orow"><input type="radio" name="r${n}" data-f="r" data-k="${k}" ${q.answer===String(k)?"checked":""}><input data-f="o" data-k="${k}" placeholder="Option ${"ABCD"[k]} (select the correct one)" value="${esc(o)}"></label>`).join(""):""}
     ${q.type=="tf"?`<select data-f="a"><option${q.answer=="True"?" selected":""}>True</option><option${q.answer=="False"?" selected":""}>False</option></select>`:""}
-    ${q.type=="short"?`<input data-f="a" placeholder="Correct answer (not case sensitive)" value="${esc(q.answer)}">`:""}
-    ${q.type=="essay"?'<p class="mu" style="padding:0 16px 12px">Graded by you after the exam.</p>':""}</div>`).join("")}</div>
+    ${q.type=="short"?`<label class="orow chk"><input type="checkbox" data-f="m" ${q.manual?"checked":""}><span>I will check the answers myself</span></label>${q.manual?'<p class="mu" style="padding:0 16px 12px">You mark each answer Correct or Wrong in Results.</p>':`<input data-f="a" placeholder="Correct answer (not case sensitive)" value="${esc(q.answer)}">`}`:""}
+    ${q.type=="essay"?'<p class="mu" style="padding:0 16px 12px">You mark this one in Results.</p>':""}</div>`).join("")}</div>
     <div class="adds">${Object.keys(names).map(t=>`<button class="btn s sm" data-a="${t}">+ ${names[t]}</button>`).join("")}</div>
     <button class="btn" id="sv">Publish exam</button><p class="mu c" id="er"></p></div>`);
     $("#ti").oninput=$("#mn").oninput=()=>{E.title=$("#ti").value;E.minutes=+$("#mn").value||30};
     $("#qs").oninput=$("#qs").onchange=e=>{const t=e.target,f=t.dataset.f;if(!f)return;const q=E.questions[t.closest("[data-n]").dataset.n];
+      if(f=="m"){if(e.type!="change")return;q.manual=t.checked;if(q.manual)q.answer="";return draw()}
       if(f=="t")q.text=t.value;if(f=="o")q.options[t.dataset.k]=t.value;if(f=="r")q.answer=t.dataset.k;if(f=="a")q.answer=t.value};
     app.querySelectorAll("[data-d]").forEach(a=>a.onclick=e=>{e.preventDefault();E.questions.splice(+a.dataset.d,1);draw()});
     app.querySelectorAll("[data-a]").forEach(b=>b.onclick=()=>add(b.dataset.a));
     $("#cx").onclick=e=>{e.preventDefault();dash()};
     $("#sv").onclick=async()=>{const q=E.questions;
-      const bad=!E.title.trim()?"Add an exam title.":!q.length?"Add at least one question.":q.findIndex(x=>!x.text.trim()||(x.type=="mc"&&x.options.some(o=>!o.trim()))||(x.type!="essay"&&!String(x.answer).trim()));
+      const bad=!E.title.trim()?"Add an exam title.":!q.length?"Add at least one question.":q.findIndex(x=>!x.text.trim()||(x.type=="mc"&&x.options.some(o=>!o.trim()))||(!isManual(x)&&!String(x.answer).trim()));
       if(typeof bad=="string")return $("#er").textContent=bad;
       if(bad>=0)return $("#er").textContent="Complete question "+(bad+1)+" and pick its correct answer.";
       for(let t=0;t<5;t++){
@@ -208,23 +248,78 @@ function build(){
   draw();
 }
 
+/* ---------- RESULTS (live) ---------- */
+let S=[],EX=null,OPEN=new Set(),AL=[];
+const stamp=()=>new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"});
+function warnT(m){AL.unshift({t:stamp(),m,c:1});const a=$("#al");a.textContent=m;a.className="on";beep();clearTimeout(alT);alT=setTimeout(()=>a.className="",6000)}
+
+function onChange(p){
+  if(p.eventType=="DELETE"){S=S.filter(x=>x.id!=p.old.id);return paint()}
+  const n=p.new,o=S.find(x=>x.id==n.id);
+  if(!o)AL.unshift({t:stamp(),m:n.student+" joined",c:0});
+  else{
+    if(n.violations>o.violations)warnT(n.student+" left the exam screen ("+n.violations+" of "+MAX+")");
+    if(o.status!="submitted"&&n.status=="submitted")AL.unshift({t:stamp(),m:n.student+" submitted",c:0});
+  }
+  S=o?S.map(x=>x.id==n.id?n:x):[n,...S];AL=AL.slice(0,8);paint();
+}
+
 async function results(id){
+  unlock();
+  if(CH){sb.removeChannel(CH);CH=null}
   const[{data:e},{data:s}]=await Promise.all([
     sb.from("exams").select("*").eq("id",id).single(),
-    sb.from("submissions").select("*").eq("exam_id",id).order("started_at",{ascending:false})]);
-  const f=s.filter(x=>x.status=="submitted"),p=f.filter(x=>x.total).map(x=>x.score/x.total*100);
-  const avg=p.length?Math.round(p.reduce((a,b)=>a+b,0)/p.length)+"%":"-";
+    sb.from("submissions").select("*").eq("exam_id",id)]);
+  EX=e;S=s||[];OPEN=new Set();AL=[];LIVE=false;scrollTo(0,0);paint();
+  CH=sb.channel("sub-"+id).on("postgres_changes",{event:"*",schema:"public",table:"submissions",filter:"exam_id=eq."+id},onChange)
+    .subscribe(st=>{LIVE=st=="SUBSCRIBED";paint()});
+}
+
+function paint(){
+  const y=scrollY,e=EX,Q=e.questions;
+  const man=Q.map((q,n)=>isManual(q)?n:-1).filter(n=>n>=0);
+  const f=S.filter(x=>x.status=="submitted");
+  const pct=x=>x.status=="submitted"&&x.total?Math.round(x.score/x.total*100):null;
+  const ps=f.map(pct).filter(x=>x!=null);
+  const pend=x=>man.filter(n=>!x.grades||x.grades[n]===undefined).length;
   const st=(n,l)=>`<div class="stat"><b>${n}</b><span>${l}</span></div>`;
-  view(`<div class="wrap"><div class="row"><a href="#" id="bk">&lsaquo; Exams</a><a href="#" id="rf">Refresh</a></div>
+  const rows=[...S].sort((a,b)=>(a.status=="submitted")!=(b.status=="submitted")?(a.status=="submitted"?-1:1):((pct(b)??-1)-(pct(a)??-1))||a.student.localeCompare(b.student));
+  const detail=x=>`<tr class="det"><td colspan="6"><div class="tbl"><table><tr><th>#</th><th>Question</th><th>Answer</th><th>Result</th></tr>${Q.map((q,n)=>{
+    const a=x.answers?x.answers[n]:undefined,g=x.grades?x.grades[n]:undefined;let r;
+    if(x.status!="submitted")r='<span class="mu">In progress</span>';
+    else if(isManual(q))r=`<button class="gb y${g===true?" on":""}" data-gr="${x.id}|${n}|1">Correct</button> <button class="gb n${g===false?" on":""}" data-gr="${x.id}|${n}|0">Wrong</button>`;
+    else r=ok(q,a)?'<b class="g">Correct</b>':`<b class="r">Wrong</b><br><span class="mu">Key: ${esc(show(q,q.answer))}</span>`;
+    return`<tr><td>${n+1}</td><td class="wr">${esc(q.text)}</td><td class="wr">${esc(show(q,a))}</td><td>${r}</td></tr>`}).join("")}</table></div>${x.last_violation_at?`<p class="mu" style="margin:8px 4px 0">Last left the screen at ${new Date(x.last_violation_at).toLocaleTimeString()}</p>`:""}</td></tr>`;
+  const accRows=Q.map((q,n)=>{let c,t,tp;
+    if(isManual(q)){const gs=f.filter(x=>x.grades&&x.grades[n]!==undefined);t=gs.length;c=gs.filter(x=>x.grades[n]===true).length;tp="You check"}
+    else{t=f.length;c=f.filter(x=>ok(q,x.answers?x.answers[n]:undefined)).length;tp="Auto"}
+    const r=t?Math.round(c/t*100):null;
+    return`<tr><td>${n+1}</td><td class="wr">${esc(q.text.slice(0,70))}</td><td>${tp}</td><td>${r==null?"-":r+"%"}</td></tr>`}).join("");
+  app.innerHTML=`<div class="wrap"><div class="row"><a href="#" id="bk">&lsaquo; Exams</a><span class="mu"><i class="live${LIVE?"":" off"}"></i>${LIVE?"Live":"Connecting"}</span><a href="#" id="cv">Export CSV</a></div>
   <h1>${esc(e.title)}</h1><p class="mu">Code <b class="code">${e.code}</b></p>
-  <div class="stats">${st(s.length,"Joined")}${st(f.length,"Done")}${st(avg,"Average")}${st(p.length?Math.round(Math.max(...p))+"%":"-","Highest")}${st(p.length?Math.round(Math.min(...p))+"%":"-","Lowest")}</div>
-  <h3>Question accuracy</h3><div class="card">${e.questions.map((q,n)=>{if(q.type=="essay")return"";
-    const c=f.filter(x=>ok(q,x.answers[n])).length,r=f.length?Math.round(c/f.length*100):0;
-    return`<div class="acc"><span>Q${n+1}</span><div class="bar2"><i style="width:${r}%"></i></div><b>${r}%</b></div>`}).join("")||'<p class="mu" style="padding:12px 16px">No auto-graded questions.</p>'}</div>
-  <h3>Students</h3>${s.map(x=>`<details class="card"><summary><b>${esc(x.student)}</b><span>${x.status=="submitted"?x.score+"/"+x.total:"In progress"}${x.violations?` <em class="warn">${x.violations} left</em>`:""}</span></summary>
-  ${e.questions.map((q,n)=>{const a=x.answers[n];return`<div class="ans"><p>${n+1}. ${esc(q.text)}</p><p class="${q.type=="essay"?"":ok(q,a)?"g":"r"}">${esc(show(q,a))}</p>${q.type!="essay"&&!ok(q,a)?`<p class="mu">Correct: ${esc(show(q,q.answer))}</p>`:""}</div>`}).join("")}</details>`).join("")||'<p class="mu c">No students yet. Share the code or link.</p>'}</div>`);
-  $("#bk").onclick=e=>{e.preventDefault();dash()};
-  $("#rf").onclick=e=>{e.preventDefault();results(id)};
+  <div class="stats">${st(S.length,"Joined")}${st(f.length,"Submitted")}${st(ps.length?Math.round(ps.reduce((a,b)=>a+b,0)/ps.length)+"%":"-","Average")}${st(ps.length?Math.max(...ps)+"%":"-","Highest")}${st(ps.length?Math.min(...ps)+"%":"-","Lowest")}${st(S.filter(x=>x.violations>0).length,"Left screen")}</div>
+  ${AL.length?`<h3>Live alerts</h3><div class="card">${AL.map(a=>`<div class="ala${a.c?" r":""}"><span>${a.t}</span>${esc(a.m)}</div>`).join("")}</div>`:""}
+  <h3>Students (tap a row to see answers)</h3>
+  <div class="tbl"><table><tr><th>Student</th><th>Score</th><th>%</th><th>Answered</th><th>Warnings</th><th>Status</th></tr>
+  ${rows.map(x=>{const p=pct(x),ans=Object.values(x.answers||{}).filter(a=>String(a).trim()!=="").length,pd=x.status=="submitted"?pend(x):0;
+    return`<tr class="rw" data-o="${x.id}"><td><b>${esc(x.student)}</b></td><td>${x.status=="submitted"?x.score+"/"+x.total+(pd?` <span class="pill">${pd} to check</span>`:""):"-"}</td><td>${p==null?"-":p+"%"}</td><td>${ans}/${Q.length}</td><td>${x.violations?`<span class="pill bad">${x.violations}</span>`:"0"}</td><td><span class="pill${x.status=="submitted"?" ok":""}">${x.status=="submitted"?"Done":"Taking"}</span></td></tr>${OPEN.has(x.id)?detail(x):""}`}).join("")||'<tr><td colspan="6" class="mu">No students yet. Share the code or link.</td></tr>'}</table></div>
+  <h3>Question accuracy</h3><div class="tbl"><table><tr><th>#</th><th>Question</th><th>Checked</th><th>Correct</th></tr>${accRows}</table></div></div>`;
+  scrollTo(0,y);
+  $("#bk").onclick=ev=>{ev.preventDefault();dash()};
+  app.querySelectorAll("[data-o]").forEach(r=>r.onclick=()=>{const k=r.dataset.o;OPEN.has(k)?OPEN.delete(k):OPEN.add(k);paint()});
+  app.querySelectorAll("[data-gr]").forEach(b=>b.onclick=async()=>{
+    const[k,n,v]=b.dataset.gr.split("|");
+    const{error}=await sb.rpc("grade_answer",{p_sub:k,p_idx:+n,p_ok:v=="1"});
+    if(error)return toast("Could not save: "+error.message);
+    const r=S.find(x=>x.id==k);r.grades={...(r.grades||{}),[n]:v=="1"};
+    r.score=(r.auto_score||0)+Object.values(r.grades).filter(Boolean).length;paint();
+  });
+  $("#cv").onclick=ev=>{ev.preventDefault();
+    const h=["Student","Score","Total","Percent","Warnings","Status",...Q.map((_,n)=>"Q"+(n+1))];
+    const r=rows.map(x=>[x.student,x.status=="submitted"?x.score:"",x.status=="submitted"?x.total:"",pct(x)==null?"":pct(x),x.violations,x.status,...Q.map((q,n)=>show(q,x.answers?x.answers[n]:undefined))]);
+    const csv=[h,...r].map(a=>a.map(c=>'"'+String(c).replace(/"/g,'""')+'"').join(",")).join("\n");
+    const l=document.createElement("a");l.href=URL.createObjectURL(new Blob(["\ufeff"+csv],{type:"text/csv"}));l.download=e.title.replace(/\W+/g,"_")+".csv";l.click();
+  };
 }
 
 home();
