@@ -81,6 +81,7 @@ tr.det>td{white-space:normal;background:var(--bg);padding:8px;border-top:0}
 .gb.on.y{background:var(--ok);color:#fff}.gb.on.n{background:var(--bad);color:#fff}
 .ala{padding:9px 16px;font-size:14px;border-top:1px solid var(--ln)}.ala:first-child{border-top:0}.ala span{color:var(--mu);margin-right:8px}.ala.r{color:var(--bad);font-weight:600}
 .chk{padding:12px 16px;gap:10px}.chk input{width:22px;height:22px;padding:0;accent-color:var(--ac)}
+.btn:disabled{opacity:.45;pointer-events:none}
 </style>
 </head>
 <body>
@@ -96,34 +97,65 @@ const toast=m=>{const t=$("#toast");t.textContent=m;t.className="on";setTimeout(
 const ok=(q,a)=>q.type!="essay"&&String(a??"").trim().toLowerCase()===String(q.answer).trim().toLowerCase();
 const show=(q,a)=>a==null||a===""?"No answer":q.type=="mc"?(q.options[a]??a):a;
 
-let CH=null,AC=null,LIVE=false,alT;
+let CH=null,AC=null,LIVE=false,alT,PRE;
 const unlock=()=>{try{AC=AC||new(window.AudioContext||window.webkitAudioContext)();AC.resume&&AC.resume()}catch(e){}};
 const beep=()=>{try{unlock();const o=AC.createOscillator(),g=AC.createGain();o.frequency.value=880;g.gain.value=.3;o.connect(g);g.connect(AC.destination);o.start();o.stop(AC.currentTime+.3)}catch(e){}if(navigator.vibrate)navigator.vibrate(250)};
 const kp=(fn,b)=>fetch(SB_URL+"/rest/v1/rpc/"+fn,{method:"POST",keepalive:true,headers:{apikey:SB_KEY,Authorization:"Bearer "+SB_KEY,"Content-Type":"application/json"},body:JSON.stringify(b)}).catch(()=>{});
 const isManual=q=>q.type=="essay"||q.manual===true;
+
+/* ---------- FLOATING / SPLIT-SCREEN GUARD ---------- */
+const HAS_FS=!!document.documentElement.requestFullscreen;
+const typing=()=>{const e=document.activeElement;return!!e&&(e.tagName=="INPUT"||e.tagName=="TEXTAREA")};
+/* Returns "" when the screen is fine, otherwise a short reason.
+   strict=true  : full rule used during the exam (must be full screen, full size, in focus).
+   strict=false : lighter check shown before the exam starts (page is not in full screen yet). */
+function floatCheck(strict){
+  try{
+    if(document.pictureInPictureElement){document.exitPictureInPicture&&document.exitPictureInPicture().catch(()=>{});return"A picture-in-picture video is open."}
+    const dp=window.documentPictureInPicture&&window.documentPictureInPicture.window;
+    if(dp){try{dp.close()}catch(e){}return"A floating window is open."}
+    if(document.visibilityState=="visible"&&!document.hasFocus())return"Another app or floating window is on top of this screen.";
+    const w=Math.max(innerWidth,outerWidth),h=Math.max(innerHeight,outerHeight),sw=screen.width,sh=screen.height,land=innerWidth>=innerHeight,
+      fw=land?Math.max(sw,sh):Math.min(sw,sh),fh=land?Math.min(sw,sh):Math.max(sw,sh);
+    const hMin=strict?(typing()?.55:HAS_FS?.9:.75):.6;
+    if(w<fw*.97)return"This screen is not full width. Turn off split-screen or floating mode.";
+    if(h<fh*hMin)return"This screen is not full height. Turn off split-screen or floating mode.";
+    if(strict&&HAS_FS&&!document.fullscreenElement)return"Full screen is required.";
+  }catch(e){}
+  return"";
+}
 
 /* ---------- STUDENT ---------- */
 function home(){
   const c=new URLSearchParams(location.search).get("c")||"";
   view(`<div class="wrap"><h1>Join exam</h1><p class="mu">Enter your name and the exam code from your teacher.</p>
   <div class="card"><input id="nm" placeholder="Full name" autocomplete="name"><input id="cd" placeholder="Exam code" value="${esc(c)}" autocapitalize="characters" style="text-transform:uppercase;border:0"></div>
-  <button class="btn" id="go">Start exam</button><p class="mu c" id="er"></p>
+  <p class="mu c" id="fw"></p><button class="btn" id="go">Start exam</button><p class="mu c" id="er"></p>
   <p class="c"><a href="#" id="tl">Teacher sign in</a></p></div>`);
   $("#go").onclick=async()=>{
     const n=$("#nm").value.trim(),c=$("#cd").value.trim().toUpperCase();
     if(!n||!c)return $("#er").textContent="Enter your name and the exam code.";
     unlock();
-    document.documentElement.requestFullscreen&&document.documentElement.requestFullscreen().catch(()=>{});
+    const gb=$("#go");gb.disabled=true;gb.dataset.busy=1;
+    if(HAS_FS)await document.documentElement.requestFullscreen().catch(()=>{});
+    await new Promise(r=>setTimeout(r,700));
+    const fm=floatCheck(true);
+    if(fm){if(document.fullscreenElement)document.exitFullscreen();gb.disabled=false;delete gb.dataset.busy;return $("#er").textContent=fm+" Fix it, then tap Start again."}
     const{data,error}=await sb.rpc("start_exam",{p_code:c,p_name:n});
-    if(error){if(document.fullscreenElement)document.exitFullscreen();return $("#er").textContent=error.message.includes("submitted")?"You already submitted this exam.":"Exam code not found. Check it and try again."}
-    run(data);
+    if(error){gb.disabled=false;delete gb.dataset.busy;if(document.fullscreenElement)document.exitFullscreen();return $("#er").textContent=error.message.includes("submitted")?"You already submitted this exam.":"Exam code not found. Check it and try again."}
+    clearInterval(PRE);run(data);
   };
   $("#tl").onclick=e=>{e.preventDefault();teacher()};
+  /* Before the exam: keep checking, and block Start while any floating / split screen is present. */
+  clearInterval(PRE);
+  const pre=()=>{const g=$("#go");if(!g)return clearInterval(PRE);const m=floatCheck(false);if(!g.dataset.busy)g.disabled=!!m;$("#fw").textContent=m?m+" Close it to start the exam.":""};
+  pre();PRE=setInterval(pre,500);
+  addEventListener("resize",pre);
 }
 
 function run(d){
   const Q=d.exam.questions,A=d.answers||{},end=Date.parse(d.started_at)+d.exam.minutes*6e4;
-  let i=0,v=d.violations||0,done=false,left=false,forced=false,beeped=false,busy=false,sv,tm;
+  let i=0,v=d.violations||0,done=false,left=false,forced=false,beeped=false,busy=false,flt=false,bad=0,why="",sv,tm,gt;
   const ac=new AbortController(),on=(t,f,x=document)=>x.addEventListener(t,f,{signal:ac.signal});
   const fs=()=>{document.documentElement.requestFullscreen&&document.documentElement.requestFullscreen().catch(()=>{})};
   const save=()=>{const s=$("#ss");if(s)s.textContent="Saving...";clearTimeout(sv);
@@ -140,14 +172,31 @@ function run(d){
   };
   const back=()=>{
     if(!left||done)return;
+    if(forced){left=false;return finish()}
+    if(flt)return;
     left=false;if(!beeped)beep();
-    if(forced)return finish();
     $("#ov").innerHTML=`<div class="box"><h2>Warning ${v} of ${MAX}</h2><p>You left the exam screen. Your teacher was notified. At ${MAX} warnings your exam is submitted automatically.</p><button class="btn" id="rt">Return to exam</button></div>`;
     $("#ov").className="on";$("#rt").onclick=()=>{$("#ov").className="";fs()};
   };
+  /* Floating / split-screen guard: blocks the exam until the screen is full size, full screen and in focus. */
+  const lock=m=>{
+    if(why==m&&$("#ov").className=="on")return;why=m;
+    $("#ov").innerHTML=`<div class="box"><h2>Floating screen detected</h2><p>${esc(m)}</p><p>The exam is locked until this is closed. Your teacher was notified.</p>${HAS_FS&&!document.fullscreenElement?'<button class="btn" id="rt">Enter full screen</button>':""}</div>`;
+    $("#ov").className="on";const b=$("#rt");if(b)b.onclick=fs};
+  const chk=()=>{
+    if(done||busy)return;
+    const m=floatCheck(true);
+    if(!m){bad=0;if(flt){flt=false;why="";$("#ov").className="";back()}return}
+    if(!bad)bad=Date.now();
+    if(Date.now()-bad<700)return;
+    if(!flt){flt=true;out();if(forced)return finish()}
+    lock(m);
+  };
+  on("resize",chk,window);on("orientationchange",chk,window);
+  if(window.visualViewport)visualViewport.addEventListener("resize",chk,{signal:ac.signal});
   on("visibilitychange",()=>document.hidden?out():back());
   on("blur",out,window);on("focus",back,window);
-  on("fullscreenchange",()=>{if(!document.fullscreenElement&&!done){out();back()}});
+  on("fullscreenchange",()=>{if(done)return;if(!document.fullscreenElement)out();chk()});
   for(const t of["contextmenu","copy","cut","paste","dragstart"])on(t,e=>e.preventDefault());
   on("beforeunload",e=>{if(!done){e.preventDefault();e.returnValue=""}},window);
   if(navigator.wakeLock)navigator.wakeLock.request("screen").catch(()=>{});
@@ -155,7 +204,7 @@ function run(d){
   const tick=()=>{const r=Math.max(0,Math.round((end-Date.now())/1000)),t=$("#tm");
     if(t)t.textContent=Math.floor(r/60)+":"+String(r%60).padStart(2,"0");if(!r)finish()};
   async function finish(){
-    if(done)return;done=true;clearInterval(tm);clearTimeout(sv);ac.abort();
+    if(done)return;done=true;clearInterval(tm);clearInterval(gt);clearTimeout(sv);ac.abort();
     if(document.fullscreenElement)document.exitFullscreen();$("#ov").className="";
     const{data,error}=await sb.rpc("submit_exam",{p_sub:d.sub,p_answers:A,p_viol:v});
     if(error){done=false;view(`<div class="wrap c"><h1>Connection problem</h1><p class="mu">Your answers are safe. Check your internet and retry.</p><button class="btn" id="rt">Retry</button></div>`);$("#rt").onclick=finish;return}
@@ -183,7 +232,7 @@ function run(d){
     if($("#sb"))$("#sb").onclick=()=>{const m=Q.filter((_,k)=>!A[k]).length;busy=true;const y=confirm(m?m+" unanswered. Submit anyway?":"Submit your exam?");setTimeout(()=>{busy=false},800);if(y)finish()};
     tick();
   };
-  fs();draw();tm=setInterval(tick,1000);
+  fs();draw();tm=setInterval(tick,1000);gt=setInterval(chk,500);
 }
 
 /* ---------- TEACHER ---------- */
